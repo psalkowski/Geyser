@@ -26,12 +26,15 @@
 package org.geysermc.geyser.util;
 
 import net.raphimc.minecraftauth.msa.model.MsaDeviceCode;
+import org.checkerframework.checker.nullness.qual.Nullable;
+import org.cloudburstmc.protocol.bedrock.BedrockPeer;
 import org.cloudburstmc.protocol.bedrock.data.auth.AuthPayload;
 import org.cloudburstmc.protocol.bedrock.data.auth.AuthType;
 import org.cloudburstmc.protocol.bedrock.data.auth.CertificateChainPayload;
 import org.cloudburstmc.protocol.bedrock.data.auth.TokenPayload;
 import org.cloudburstmc.protocol.bedrock.packet.LoginPacket;
 import org.cloudburstmc.protocol.bedrock.packet.ServerToClientHandshakePacket;
+import org.cloudburstmc.protocol.bedrock.packet.SubClientLoginPacket;
 import org.cloudburstmc.protocol.bedrock.util.ChainValidationResult;
 import org.cloudburstmc.protocol.bedrock.util.ChainValidationResult.IdentityData;
 import org.cloudburstmc.protocol.bedrock.util.EncryptionUtils;
@@ -61,6 +64,79 @@ public class LoginEncryptionUtils {
 
     public static void encryptPlayerConnection(GeyserSession session, LoginPacket loginPacket) {
         encryptConnectionWithCert(session, loginPacket.getAuthPayload(), loginPacket.getClientJwt());
+    }
+
+    public static boolean setupSubClientSession(GeyserSession session, SubClientLoginPacket subClientLoginPacket) {
+        try {
+            GeyserImpl geyser = session.getGeyser();
+            AuthPayload authPayload = subClientLoginPacket.getAuthPayload();
+            String jwt = subClientLoginPacket.getClientJwt();
+
+            ChainValidationResult result = EncryptionUtils.validatePayload(authPayload);
+
+            if (!result.signed() && geyser.config().advanced().bedrock().validateBedrockLogin()) {
+                return false;
+            }
+
+            Long rawIssuedAt = (Long) result.rawIdentityClaims().get("iat");
+            long issuedAt = rawIssuedAt != null ? rawIssuedAt : -1;
+
+            IdentityData extraData = result.identityClaims().extraData;
+            AuthData authData = new AuthData(extraData.displayName, extraData.identity, extraData.xuid, issuedAt, extraData.minecraftId);
+            session.setAuthData(authData);
+
+            if (authPayload instanceof TokenPayload tokenPayload) {
+                session.setToken(tokenPayload.getToken());
+            } else if (authPayload instanceof CertificateChainPayload certificateChainPayload) {
+                session.setCertChainData(certificateChainPayload.getChain());
+            }
+
+            PublicKey identityPublicKey = result.identityClaims().parsedIdentityPublicKey();
+
+            byte[] clientDataPayload = EncryptionUtils.verifyClientData(jwt, identityPublicKey);
+            if (clientDataPayload == null) {
+                return false;
+            }
+
+            BedrockClientData data = JsonUtils.fromJson(clientDataPayload, BedrockClientData.class);
+            data.setOriginalString(jwt);
+
+            GeyserSession parent = primarySessionOnSameConsole(session);
+            if (parent != null) {
+                session.setParentSession(parent);
+                session.integratedPackActive(parent.integratedPackActive());
+                BedrockClientData parentData = parent.getClientData();
+                if (parentData != null) {
+                    if (data.getLanguageCode() == null) {
+                        data.setLanguageCode(parentData.getLanguageCode());
+                    }
+                    if (data.getServerAddress() == null) {
+                        data.setServerAddress(parentData.getServerAddress());
+                    }
+                    if (data.getGameVersion() == null) {
+                        data.setGameVersion(parentData.getGameVersion());
+                    }
+                }
+            }
+
+            session.setClientData(data);
+
+            return true;
+        } catch (Exception ex) {
+            session.getGeyser().getLogger().error("Failed to setup sub-client session", ex);
+            return false;
+        }
+    }
+
+    public static @Nullable GeyserSession primarySessionOnSameConsole(GeyserSession subClient) {
+        BedrockPeer peer = subClient.getUpstream().getSession().getPeer();
+        for (GeyserSession other : subClient.getGeyser().getSessionManager().getAllSessions()) {
+            if (other != subClient && other.getUpstream().getSession().getPeer() == peer
+                    && !other.getUpstream().getSession().isSubClient() && other.getClientData() != null) {
+                return other;
+            }
+        }
+        return null;
     }
 
     private static void encryptConnectionWithCert(GeyserSession session, AuthPayload authPayload, String jwt) {

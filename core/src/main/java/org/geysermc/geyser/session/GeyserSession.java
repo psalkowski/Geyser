@@ -273,6 +273,8 @@ public class GeyserSession implements GeyserConnection, GeyserCommandSource {
     private final GeyserImpl geyser;
     private final UpstreamSession upstream;
     private DownstreamSession downstream;
+    @Setter
+    private GeyserSession parentSession;
     /**
      * The loop where all packets and ticking is processed to prevent concurrency issues.
      * If this is manually called, ensure that any exceptions are properly handled.
@@ -1261,7 +1263,7 @@ public class GeyserSession implements GeyserConnection, GeyserCommandSource {
             }
 
             // Disconnect upstream if necessary
-            if (!upstream.isClosed()) {
+            if (ownsUpstreamConnection() && !upstream.isClosed()) {
                 upstream.disconnect(disconnectEvent.disconnectReason());
             }
 
@@ -1347,6 +1349,11 @@ public class GeyserSession implements GeyserConnection, GeyserCommandSource {
      * Called every Minecraft tick.
      */
     protected void tick() {
+        if (parentSession != null && parentSession.isClosed()) {
+            disconnect("Parent session closed");
+            return;
+        }
+
         try {
             pistonCache.tick();
 
@@ -1725,7 +1732,11 @@ public class GeyserSession implements GeyserConnection, GeyserCommandSource {
 
     @Override
     public String locale() {
-        return clientData != null ? clientData.getLanguageCode() : GeyserLocale.getDefaultLocale();
+        if (clientData == null) {
+            return GeyserLocale.getDefaultLocale();
+        }
+        String languageCode = clientData.getLanguageCode();
+        return languageCode != null ? languageCode : GeyserLocale.getDefaultLocale();
     }
 
     @Override
@@ -2604,6 +2615,14 @@ public class GeyserSession implements GeyserConnection, GeyserCommandSource {
     @Override
     public boolean isLinked() {
         return false; //todo
+    }
+
+    public boolean isSubClient() {
+        return upstream.getSession().isSubClient();
+    }
+
+    private boolean ownsUpstreamConnection() {
+        return !isSubClient();
     }
 
     @SuppressWarnings("ConstantConditions") // Need to enforce the parameter annotations

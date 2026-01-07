@@ -36,6 +36,7 @@ import org.cloudburstmc.protocol.bedrock.netty.codec.compression.CompressionStra
 import org.cloudburstmc.protocol.bedrock.netty.codec.compression.SimpleCompressionStrategy;
 import org.cloudburstmc.protocol.bedrock.netty.codec.compression.ZlibCompression;
 import org.cloudburstmc.protocol.bedrock.packet.BedrockPacket;
+import org.cloudburstmc.protocol.bedrock.packet.DisconnectPacket;
 import org.cloudburstmc.protocol.bedrock.packet.LoginPacket;
 import org.cloudburstmc.protocol.bedrock.packet.ModalFormResponsePacket;
 import org.cloudburstmc.protocol.bedrock.packet.NetworkSettingsPacket;
@@ -49,6 +50,7 @@ import org.cloudburstmc.protocol.bedrock.packet.ResourcePackDataInfoPacket;
 import org.cloudburstmc.protocol.bedrock.packet.ResourcePackStackPacket;
 import org.cloudburstmc.protocol.bedrock.packet.ResourcePacksInfoPacket;
 import org.cloudburstmc.protocol.bedrock.packet.SetTitlePacket;
+import org.cloudburstmc.protocol.bedrock.packet.SubClientLoginPacket;
 import org.cloudburstmc.protocol.common.PacketSignal;
 import org.cloudburstmc.protocol.common.util.Zlib;
 import org.geysermc.geyser.Constants;
@@ -158,6 +160,15 @@ public class UpstreamPacketHandler extends LoggingPacketHandler {
     }
 
     @Override
+    public PacketSignal handle(DisconnectPacket packet) {
+        if (!session.isSubClient()) {
+            return super.handle(packet);
+        }
+        session.disconnect(packet.getKickMessage() != null ? packet.getKickMessage() : "Client disconnected");
+        return PacketSignal.HANDLED;
+    }
+
+    @Override
     public PacketSignal handle(RequestNetworkSettingsPacket packet) {
         if (!setCorrectCodec(packet.getProtocolVersion())) {
             return PacketSignal.HANDLED;
@@ -240,6 +251,68 @@ public class UpstreamPacketHandler extends LoggingPacketHandler {
         session.sendUpstreamPacket(resourcePacksInfo);
 
         GeyserLocale.loadGeyserLocale(session.locale());
+        return PacketSignal.HANDLED;
+    }
+
+    @Override
+    public PacketSignal handle(SubClientLoginPacket subClientLoginPacket) {
+        if (geyser.isShuttingDown() || geyser.isReloading()) {
+            session.disconnect(GeyserLocale.getLocaleStringLog("geyser.core.shutdown.kick.message"));
+            return PacketSignal.HANDLED;
+        }
+
+        if (!session.isSubClient() || LoginEncryptionUtils.primarySessionOnSameConsole(session) == null) {
+            session.disconnect("Unexpected sub-client login");
+            return PacketSignal.HANDLED;
+        }
+
+        if (!session.isClosed() && session.getAuthData() != null) {
+            session.disconnect("Rejoining split-screen");
+        }
+        if (session.isClosed()) {
+            replaceSession(new GeyserSession(geyser, session.getUpstream().getSession(), session.getTickEventLoop()));
+        }
+
+        if (!LoginEncryptionUtils.setupSubClientSession(session, subClientLoginPacket)) {
+            session.disconnect("Failed to authenticate sub-client");
+            return PacketSignal.HANDLED;
+        }
+
+        GeyserSession existingSession = geyser.getSessionManager().sessionByXuid(session.xuid());
+        if (existingSession != null && existingSession.isSubClient()
+                && existingSession.getUpstream().getSession().getPeer() == session.getUpstream().getSession().getPeer()) {
+            existingSession.disconnect("Rejoining split-screen");
+            existingSession = null;
+        }
+        if (existingSession != null || geyser.getSessionManager().isXuidAlreadyPending(session.xuid())) {
+            session.disconnect(GeyserLocale.getLocaleStringLog("geyser.auth.already_loggedin", session.bedrockUsername()));
+            return PacketSignal.HANDLED;
+        }
+
+        int protocolVersion = session.getUpstream().getSession().getCodec().getProtocolVersion();
+        session.setBlockMappings(BlockRegistries.BLOCKS.forVersion(protocolVersion));
+        session.setItemMappings(Registries.ITEMS.forVersion(protocolVersion));
+
+        geyser.getSessionManager().addPendingSession(session);
+        geyser.eventBus().fire(new SessionInitializeEvent(session));
+
+        PlayStatusPacket playStatus = new PlayStatusPacket();
+        playStatus.setStatus(PlayStatusPacket.Status.LOGIN_SUCCESS);
+        session.sendUpstreamPacket(playStatus);
+
+        finishedResourcePackSending = true;
+
+        GeyserLocale.loadGeyserLocale(session.locale());
+
+        if (geyser.config().java().authType() != AuthType.ONLINE) {
+            session.authenticate(session.getAuthData().name());
+        } else if (!couldLoginUserByName(session.getAuthData().name())) {
+            session.connect();
+        }
+
+        geyser.getLogger().info(GeyserLocale.getLocaleStringLog("geyser.network.connect", session.getAuthData().name() +
+            " (" + protocolVersion + ") [SUB-CLIENT]"));
+
         return PacketSignal.HANDLED;
     }
 
