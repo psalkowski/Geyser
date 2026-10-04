@@ -105,6 +105,13 @@ public class Entity implements GeyserEntity {
     @Accessors(fluent = true)
     protected UUID uuid;
     /**
+     * Set while another split-screen player on this console still tracks this entity, so despawning it here must
+     * leave it on the client.
+     */
+    private boolean keptByOtherSession;
+    @Setter(AccessLevel.NONE)
+    private boolean holdsSharedGeyserId;
+    /**
      * Do not call this setter directly!
      * This will bypass the scoreboard and setting the metadata
      */
@@ -312,11 +319,18 @@ public class Entity implements GeyserEntity {
             }
         }
 
-        RemoveEntityPacket removeEntityPacket = new RemoveEntityPacket();
-        removeEntityPacket.setUniqueEntityId(geyserId);
-        session.sendUpstreamPacket(removeEntityPacket);
+        if (!keptByOtherSession) {
+            RemoveEntityPacket removeEntityPacket = new RemoveEntityPacket();
+            removeEntityPacket.setUniqueEntityId(geyserId);
+            session.sendUpstreamPacket(removeEntityPacket);
+        }
 
         valid = false;
+    }
+
+    public void useSharedGeyserId(long geyserId) {
+        this.geyserId = geyserId;
+        this.holdsSharedGeyserId = true;
     }
 
     public void moveRelative(double relX, double relY, double relZ, float yaw, float pitch, float headYaw, boolean isOnGround) {

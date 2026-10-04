@@ -26,14 +26,18 @@
 package org.geysermc.geyser.network.bedrock;
 
 import io.netty.channel.Channel;
+import lombok.Getter;
 import org.cloudburstmc.protocol.bedrock.BedrockPeer;
 import org.cloudburstmc.protocol.bedrock.BedrockSession;
 import org.cloudburstmc.protocol.bedrock.BedrockSessionFactory;
+import org.geysermc.geyser.session.cache.SplitScreenEntityIds;
 
 import java.net.SocketAddress;
 
 public class GeyserBedrockPeer extends BedrockPeer {
     private SocketAddress proxiedAddress;
+    @Getter
+    private final SplitScreenEntityIds splitScreenEntityIds = new SplitScreenEntityIds();
 
     public GeyserBedrockPeer(Channel channel, BedrockSessionFactory sessionFactory) {
         super(channel, sessionFactory);

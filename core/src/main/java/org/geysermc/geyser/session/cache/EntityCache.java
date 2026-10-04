@@ -35,10 +35,14 @@ import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import lombok.Getter;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.geysermc.geyser.entity.EntitySpectateHelper;
 import org.geysermc.geyser.entity.type.Entity;
+import org.geysermc.geyser.entity.type.FishingHookEntity;
 import org.geysermc.geyser.entity.type.Tickable;
+import org.geysermc.geyser.entity.type.player.AvatarEntity;
 import org.geysermc.geyser.entity.type.player.PlayerEntity;
+import org.geysermc.geyser.network.bedrock.GeyserBedrockPeer;
 import org.geysermc.geyser.session.GeyserSession;
 import org.geysermc.geyser.session.cache.waypoint.GeyserWaypoint;
 
@@ -143,6 +147,22 @@ public class EntityCache {
     }
 
     /**
+     * The console-wide id table, for an entity the Java server reported. Players and mannequins keep their own ids as
+     * they are also player-list entries, and fishing bobbers are re-numbered per session (see {@link #reassignGeyserId}).
+     */
+    private @Nullable SplitScreenEntityIds splitScreenEntityIds(Entity entity) {
+        if (entity.uuid() == null || entity.getEntityId() <= 0
+                || entity instanceof AvatarEntity || entity instanceof FishingHookEntity) {
+            return null;
+        }
+        var upstream = session.getUpstream();
+        var bedrockSession = upstream == null ? null : upstream.getSession();
+        return bedrockSession != null && bedrockSession.getPeer() instanceof GeyserBedrockPeer peer
+                ? peer.getSplitScreenEntityIds()
+                : null;
+    }
+
+    /**
      * Returns the raw, mutable backing entity map. This bypasses the read/write lock that guards the map, so it
      * <b>must only be accessed on the session's event loop thread</b>, where it is sequential with all mutations. You should never
      * mutate it directly, use {@link #spawnEntity(Entity)} or {@link #removeEntity(Entity)} and related methods instead.
@@ -176,6 +196,13 @@ public class EntityCache {
         try {
             // Check to see if the entity exists, otherwise we can end up with duplicated mobs
             if (!entityIdTranslations.containsKey(entity.getEntityId())) {
+                SplitScreenEntityIds sharedIds = splitScreenEntityIds(entity);
+                if (sharedIds != null) {
+                    Long sharedId = sharedIds.acquire(entity.uuid(), entity.getEntityId(), session, entity.geyserId());
+                    if (sharedId != null) {
+                        entity.useSharedGeyserId(sharedId);
+                    }
+                }
                 entityIdTranslations.put(entity.getEntityId(), entity.geyserId());
                 entities.put(entity.geyserId(), entity);
                 if (entity.uuid() != null) {
@@ -223,7 +250,10 @@ public class EntityCache {
             session.getPlayerWithCustomHeads().remove(player.uuid());
         }
 
+        SplitScreenEntityIds sharedIds = entity.isHoldsSharedGeyserId() ? splitScreenEntityIds(entity) : null;
+        boolean lastHolder = sharedIds == null || sharedIds.release(entity.uuid(), entity.getEntityId(), session);
         if (entity.isValid()) {
+            entity.setKeptByOtherSession(!lastHolder);
             entity.despawnEntity();
         }
 
