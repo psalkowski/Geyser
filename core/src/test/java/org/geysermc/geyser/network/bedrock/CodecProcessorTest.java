@@ -25,16 +25,25 @@
 
 package org.geysermc.geyser.network.bedrock;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufUtil;
+import io.netty.buffer.Unpooled;
 import org.cloudburstmc.protocol.bedrock.codec.BedrockCodec;
 import org.cloudburstmc.protocol.bedrock.codec.BedrockPacketDefinition;
 import org.cloudburstmc.protocol.bedrock.codec.BedrockPacketSerializer;
+import org.cloudburstmc.protocol.bedrock.data.auth.AuthType;
+import org.cloudburstmc.protocol.bedrock.data.auth.CertificateChainPayload;
+import org.cloudburstmc.protocol.bedrock.data.auth.TokenPayload;
 import org.cloudburstmc.protocol.bedrock.packet.BedrockPacket;
+import org.cloudburstmc.protocol.bedrock.packet.SubClientLoginPacket;
+import org.cloudburstmc.protocol.common.util.VarInts;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Field;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -73,6 +82,37 @@ public class CodecProcessorTest {
                 checkSerializer(processedCodec, baseCodec, packetClass);
             }
         }
+    }
+
+    @Test
+    public void subClientLoginPrefersTokenOverCertificateChain() {
+        String bothPresent = "{\"AuthenticationType\":0,\"Certificate\":\"{\\\"chain\\\":[\\\"self.signed.jwt\\\"]}\",\"Token\":\"signed-token\"}";
+        String certificateOnly = "{\"AuthenticationType\":0,\"Certificate\":\"{\\\"chain\\\":[\\\"self.signed.jwt\\\"]}\",\"Token\":\"\"}";
+
+        for (BedrockCodec codec : GameProtocol.SUPPORTED_BEDROCK_CODECS) {
+            SubClientLoginPacket withToken = decodeSubClientLogin(codec, bothPresent);
+            TokenPayload token = Assertions.assertInstanceOf(TokenPayload.class, withToken.getAuthPayload(),
+                    "protocol " + codec.getProtocolVersion());
+            Assertions.assertEquals("signed-token", token.getToken());
+            Assertions.assertEquals(AuthType.FULL, token.getAuthType());
+
+            Assertions.assertInstanceOf(CertificateChainPayload.class, decodeSubClientLogin(codec, certificateOnly).getAuthPayload(),
+                    "protocol " + codec.getProtocolVersion());
+        }
+    }
+
+    private static SubClientLoginPacket decodeSubClientLogin(BedrockCodec codec, String authJwt) {
+        String clientJwt = "client.data.jwt";
+        ByteBuf buffer = Unpooled.buffer();
+        VarInts.writeUnsignedInt(buffer, ByteBufUtil.utf8Bytes(authJwt) + ByteBufUtil.utf8Bytes(clientJwt) + 8);
+        buffer.writeIntLE(ByteBufUtil.utf8Bytes(authJwt));
+        buffer.writeCharSequence(authJwt, StandardCharsets.UTF_8);
+        buffer.writeIntLE(ByteBufUtil.utf8Bytes(clientJwt));
+        buffer.writeCharSequence(clientJwt, StandardCharsets.UTF_8);
+
+        SubClientLoginPacket packet = new SubClientLoginPacket();
+        codec.getPacketDefinition(SubClientLoginPacket.class).getSerializer().deserialize(buffer, codec.createHelper(), packet);
+        return packet;
     }
 
     private <T extends BedrockPacket> void checkSerializer(BedrockCodec processed, BedrockCodec base, Class<T> packetClass) {

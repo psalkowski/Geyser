@@ -96,7 +96,7 @@ public class LoginEncryptionUtils {
             ChainValidationResult result = validateSubClientPayload(authPayload);
             if (!result.signed() && geyser.config().advanced().bedrock().validateBedrockLogin()) {
                 geyser.getLogger().warning("Split-screen: sub-client login chain is unsigned and "
-                        + "validate-bedrock-login is on; rejecting it.");
+                        + "validate-bedrock-login is on; rejecting it. Payload: " + describe(authPayload));
                 return false;
             }
 
@@ -140,7 +140,8 @@ public class LoginEncryptionUtils {
             }
 
             IdentityData extraData = result.identityClaims().extraData;
-            AuthData authData = resolveSubClientAuthData(geyser, session, parent, extraData, result);
+            AuthData authData = resolveSubClientAuthData(geyser, session, parent, extraData, result,
+                    authPayload instanceof TokenPayload);
             session.setAuthData(authData);
 
             if (authPayload instanceof TokenPayload tokenPayload) {
@@ -238,7 +239,7 @@ public class LoginEncryptionUtils {
      */
     private static AuthData resolveSubClientAuthData(GeyserImpl geyser, GeyserSession session,
                                                      GeyserSession parent, @Nullable IdentityData extraData,
-                                                     ChainValidationResult result) {
+                                                     ChainValidationResult result, boolean identityDerivedFromXuid) {
         int slot = session.getUpstream().getSubClientId();
 
         Long rawIssuedAt = (Long) result.rawIdentityClaims().get("iat");
@@ -268,7 +269,9 @@ public class LoginEncryptionUtils {
         UUID identity = rawIdentity;
         boolean identityIdentifies = identity != null
                 && !identity.equals(NIL_UUID)
-                && !identity.equals(parent.getAuthData().uuid());
+                && !identity.equals(parent.getAuthData().uuid())
+                // A token's identity is hashed from its XUID, so without one it is the same for every guest.
+                && !(identityDerivedFromXuid && isBlank(rawXuid));
 
         String xuid = rawXuid;
         if (isBlank(xuid)) {
@@ -302,6 +305,13 @@ public class LoginEncryptionUtils {
 
     private static boolean isBlank(@Nullable String value) {
         return value == null || value.isBlank();
+    }
+
+    private static String describe(AuthPayload payload) {
+        if (payload instanceof CertificateChainPayload chainPayload) {
+            return "certificate chain of " + chainPayload.getChain().size() + ", " + payload.getAuthType();
+        }
+        return payload.getClass().getSimpleName() + ", " + payload.getAuthType();
     }
 
     private static String describe(@Nullable String value) {

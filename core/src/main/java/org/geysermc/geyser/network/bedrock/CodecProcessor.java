@@ -47,9 +47,12 @@ import org.cloudburstmc.protocol.bedrock.codec.v662.serializer.SetEntityMotionSe
 import org.cloudburstmc.protocol.bedrock.codec.v712.serializer.MobArmorEquipmentSerializer_v712;
 import org.cloudburstmc.protocol.bedrock.codec.v748.serializer.InventoryContentSerializer_v748;
 import org.cloudburstmc.protocol.bedrock.codec.v748.serializer.InventorySlotSerializer_v748;
+import org.cloudburstmc.protocol.bedrock.codec.v818.serializer.SubClientLoginSerializer_v818;
 import org.cloudburstmc.protocol.bedrock.codec.v975.serializer.InventorySlotSerializer_v975;
 import org.cloudburstmc.protocol.bedrock.codec.v975.serializer.MobEquipmentSerializer_v975;
 import org.cloudburstmc.protocol.bedrock.codec.v975.serializer.MoveEntityAbsoluteSerializer_v975;
+import org.cloudburstmc.protocol.bedrock.data.auth.AuthPayload;
+import org.cloudburstmc.protocol.bedrock.data.auth.TokenPayload;
 import org.cloudburstmc.protocol.bedrock.packet.AnvilDamagePacket;
 import org.cloudburstmc.protocol.bedrock.packet.BedrockPacket;
 import org.cloudburstmc.protocol.bedrock.packet.BossEventPacket;
@@ -90,7 +93,10 @@ import org.cloudburstmc.protocol.bedrock.packet.SetEntityMotionPacket;
 import org.cloudburstmc.protocol.bedrock.packet.SettingsCommandPacket;
 import org.cloudburstmc.protocol.bedrock.packet.SimpleEventPacket;
 import org.cloudburstmc.protocol.bedrock.packet.SubChunkRequestPacket;
+import org.cloudburstmc.protocol.bedrock.packet.SubClientLoginPacket;
 import org.cloudburstmc.protocol.common.util.VarInts;
+import org.jose4j.json.JsonUtil;
+import org.jose4j.lang.JoseException;
 import org.geysermc.geyser.session.UpstreamSession;
 
 /**
@@ -221,6 +227,26 @@ public class CodecProcessor {
     };
 
     /**
+     * Serializer that prefers the Microsoft-signed token over the legacy certificate chain, as the protocol library's
+     * LoginPacket serializer already does. The library's sub-client serializer still prefers the chain, which is
+     * not Mojang-signed on current clients, so a signed-in split-screen player was rejected as unsigned.
+     */
+    private static final BedrockPacketSerializer<SubClientLoginPacket> SUB_CLIENT_LOGIN_SERIALIZER_V818 = new SubClientLoginSerializer_v818() {
+        @Override
+        protected AuthPayload readAuthJwt(String authJwt) {
+            AuthPayload payload = super.readAuthJwt(authJwt);
+            try {
+                if (JsonUtil.parseJson(authJwt).get("Token") instanceof String token && !token.isEmpty()) {
+                    return new TokenPayload(token, payload.getAuthType());
+                }
+            } catch (JoseException e) {
+                throw new IllegalArgumentException("Failed to parse auth payload", e);
+            }
+            return payload;
+        }
+    };
+
+    /**
      * Serializer that does nothing when trying to deserialize PlayerHotbarPacket since it is not used from the client.
      */
     private static final BedrockPacketSerializer<PlayerHotbarPacket> PLAYER_HOTBAR_SERIALIZER = new PlayerHotbarSerializer_v291() {
@@ -324,6 +350,7 @@ public class CodecProcessor {
             // announces a split-screen guest, and rejecting it here tore down the whole
             // connection - ejecting the player who was already in the world. See
             // UpstreamPacketHandler#handle(SubClientLoginPacket).
+            .updateSerializer(SubClientLoginPacket.class, SUB_CLIENT_LOGIN_SERIALIZER_V818)
             .updateSerializer(SubChunkRequestPacket.class, ILLEGAL_SERIALIZER)
             .updateSerializer(GameTestRequestPacket.class, ILLEGAL_SERIALIZER)
             // Illegal bidirectional packets
