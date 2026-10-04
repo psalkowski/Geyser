@@ -66,6 +66,17 @@ public class SplitScreenEntityIdsTest {
     }
 
     @Test
+    public void onlyOneSessionSpawnsTheEntityOnTheClient() {
+        ids.acquire(creeper, JAVA_ID, primary, 10);
+        assertTrue(ids.claimSpawn(creeper, JAVA_ID));
+        ids.acquire(creeper, JAVA_ID, guest, 4294967300L);
+        assertFalse(ids.claimSpawn(creeper, JAVA_ID), "the guest must not spawn a second copy of a live id");
+
+        ids.markRemoved(creeper, JAVA_ID);
+        assertTrue(ids.claimSpawn(creeper, JAVA_ID), "an entity that removed itself to respawn may spawn again");
+    }
+
+    @Test
     public void disconnectedPlayerDoesNotKeepCreaturesAlive() {
         ids.acquire(creeper, JAVA_ID, primary, 10);
         ids.acquire(creeper, JAVA_ID, guest, 4294967300L);

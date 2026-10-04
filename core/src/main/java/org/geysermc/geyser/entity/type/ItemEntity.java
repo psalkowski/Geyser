@@ -68,7 +68,9 @@ public class ItemEntity extends ProjectileEntity {
 
         setFlagsDirty(false);
 
-        session.sendUpstreamPacket(itemPacket);
+        if (session.getEntityCache().claimClientSpawn(this)) {
+            session.sendUpstreamPacket(itemPacket);
+        }
     }
 
     @Override

@@ -254,7 +254,9 @@ public class Entity implements GeyserEntity {
 
         valid = true;
 
-        session.sendUpstreamPacket(addEntityPacket);
+        if (session.getEntityCache().claimClientSpawn(this)) {
+            session.sendUpstreamPacket(addEntityPacket);
+        }
 
         flagsDirty = false;
 
@@ -323,9 +325,14 @@ public class Entity implements GeyserEntity {
             RemoveEntityPacket removeEntityPacket = new RemoveEntityPacket();
             removeEntityPacket.setUniqueEntityId(geyserId);
             session.sendUpstreamPacket(removeEntityPacket);
+            session.getEntityCache().markRemovedFromClient(this);
         }
 
         valid = false;
+    }
+
+    public boolean isSteeredByAnotherSession() {
+        return this instanceof ClientVehicle && session.getEntityCache().isSteeredByAnotherSession(this);
     }
 
     public void useSharedGeyserId(long geyserId) {
@@ -394,7 +401,9 @@ public class Entity implements GeyserEntity {
             if (isOnGround) {
                 moveEntityPacket.getFlags().add(MoveEntityDeltaPacket.Flag.ON_GROUND);
             }
-            session.sendUpstreamPacket(moveEntityPacket);
+            if (!isSteeredByAnotherSession()) {
+                session.sendUpstreamPacket(moveEntityPacket);
+            }
         }
     }
 
@@ -422,7 +431,9 @@ public class Entity implements GeyserEntity {
             moveEntityPacket.setOnGround(isOnGround);
             moveEntityPacket.setTeleported(teleported);
 
-            session.sendUpstreamPacket(moveEntityPacket);
+            if (!isSteeredByAnotherSession()) {
+                session.sendUpstreamPacket(moveEntityPacket);
+            }
         }
     }
 

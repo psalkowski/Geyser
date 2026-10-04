@@ -88,7 +88,9 @@ public class PaintingEntity extends HangingEntity {
             case EAST -> 3;
             default -> 0;
         });
-        session.sendUpstreamPacket(addPaintingPacket);
+        if (session.getEntityCache().claimClientSpawn(this)) {
+            session.sendUpstreamPacket(addPaintingPacket);
+        }
 
         valid = true;
 

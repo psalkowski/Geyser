@@ -41,6 +41,7 @@ import org.geysermc.geyser.entity.type.Entity;
 import org.geysermc.geyser.entity.type.FishingHookEntity;
 import org.geysermc.geyser.entity.type.Tickable;
 import org.geysermc.geyser.entity.type.player.AvatarEntity;
+import org.geysermc.geyser.entity.vehicle.ClientVehicle;
 import org.geysermc.geyser.entity.type.player.PlayerEntity;
 import org.geysermc.geyser.network.bedrock.GeyserBedrockPeer;
 import org.geysermc.geyser.session.GeyserSession;
@@ -144,6 +145,40 @@ public class EntityCache {
 
     public long nextEntityId() {
         return nextEntityId.incrementAndGet();
+    }
+
+    /**
+     * @return whether this session should send the spawn: false when another split-screen player's session on this
+     * console already has the entity on the client
+     */
+    public boolean claimClientSpawn(Entity entity) {
+        SplitScreenEntityIds sharedIds = entity.isHoldsSharedGeyserId() ? splitScreenEntityIds(entity) : null;
+        return sharedIds == null || sharedIds.claimSpawn(entity.uuid(), entity.getEntityId());
+    }
+
+    public void markRemovedFromClient(Entity entity) {
+        SplitScreenEntityIds sharedIds = entity.isHoldsSharedGeyserId() ? splitScreenEntityIds(entity) : null;
+        if (sharedIds != null) {
+            sharedIds.markRemoved(entity.uuid(), entity.getEntityId());
+        }
+    }
+
+    /**
+     * Whether another split-screen player on this console is riding and steering this vehicle. The console moves it
+     * for them, so server positions from this session would drag it back.
+     */
+    public boolean isSteeredByAnotherSession(Entity entity) {
+        SplitScreenEntityIds sharedIds = entity.isHoldsSharedGeyserId() ? splitScreenEntityIds(entity) : null;
+        if (sharedIds == null) {
+            return false;
+        }
+        for (GeyserSession other : sharedIds.otherHolders(entity.uuid(), entity.getEntityId(), session)) {
+            if (other.getEntityCache().getEntityByGeyserId(entity.geyserId()) instanceof ClientVehicle vehicle
+                    && vehicle.shouldSimulateMovement()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

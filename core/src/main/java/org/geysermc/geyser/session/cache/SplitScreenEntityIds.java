@@ -28,9 +28,11 @@ package org.geysermc.geyser.session.cache;
 import org.checkerframework.checker.nullness.qual.Nullable;
 import org.geysermc.geyser.session.GeyserSession;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -51,7 +53,14 @@ public final class SplitScreenEntityIds {
     private record JavaEntity(UUID uuid, int javaId) {
     }
 
-    private record Shared(long geyserId, Set<GeyserSession> holders) {
+    private static final class Shared {
+        private final long geyserId;
+        private final Set<GeyserSession> holders = Collections.newSetFromMap(new IdentityHashMap<>());
+        private boolean onClient;
+
+        private Shared(long geyserId) {
+            this.geyserId = geyserId;
+        }
     }
 
     /**
@@ -62,13 +71,10 @@ public final class SplitScreenEntityIds {
         JavaEntity key = new JavaEntity(uuid, javaId);
         Shared shared = byEntity.get(key);
         if (shared == null || !hasLiveHolder(shared)) {
-            shared = new Shared(ownId, Collections.newSetFromMap(new IdentityHashMap<>()));
+            shared = new Shared(ownId);
             byEntity.put(key, shared);
         }
-        if (!shared.holders().add(holder)) {
-            return null;
-        }
-        return shared.geyserId();
+        return shared.holders.add(holder) ? shared.geyserId : null;
     }
 
     /**
@@ -80,7 +86,7 @@ public final class SplitScreenEntityIds {
         if (shared == null) {
             return true;
         }
-        shared.holders().remove(holder);
+        shared.holders.remove(holder);
         if (hasLiveHolder(shared)) {
             return false;
         }
@@ -89,9 +95,44 @@ public final class SplitScreenEntityIds {
         return true;
     }
 
+    /**
+     * Called before sending a spawn. The client does not merge a second spawn for a live id, so only one session
+     * may send it until the entity is removed again.
+     *
+     * @return whether the caller should send the spawn
+     */
+    public synchronized boolean claimSpawn(UUID uuid, int javaId) {
+        Shared shared = byEntity.get(new JavaEntity(uuid, javaId));
+        if (shared == null) {
+            return true;
+        }
+        if (shared.onClient) {
+            return false;
+        }
+        shared.onClient = true;
+        return true;
+    }
+
+    public synchronized void markRemoved(UUID uuid, int javaId) {
+        Shared shared = byEntity.get(new JavaEntity(uuid, javaId));
+        if (shared != null) {
+            shared.onClient = false;
+        }
+    }
+
+    public synchronized List<GeyserSession> otherHolders(UUID uuid, int javaId, GeyserSession holder) {
+        Shared shared = byEntity.get(new JavaEntity(uuid, javaId));
+        if (shared == null) {
+            return List.of();
+        }
+        List<GeyserSession> others = new ArrayList<>(shared.holders);
+        others.remove(holder);
+        return others;
+    }
+
     private static boolean hasLiveHolder(Shared shared) {
         // A session that disconnected never releases what it held.
-        shared.holders().removeIf(GeyserSession::isClosed);
-        return !shared.holders().isEmpty();
+        shared.holders.removeIf(GeyserSession::isClosed);
+        return !shared.holders.isEmpty();
     }
 }
