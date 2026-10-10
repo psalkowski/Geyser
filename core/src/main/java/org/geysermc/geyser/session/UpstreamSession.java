@@ -33,6 +33,7 @@ import org.cloudburstmc.protocol.bedrock.BedrockServerSession;
 import org.cloudburstmc.protocol.bedrock.codec.BedrockCodecHelper;
 import org.cloudburstmc.protocol.bedrock.packet.BedrockPacket;
 import org.geysermc.geyser.network.bedrock.GeyserBedrockPeer;
+import org.geysermc.geyser.network.bedrock.GeyserServerSession;
 
 import java.net.InetSocketAddress;
 import java.util.ArrayDeque;
@@ -54,6 +55,13 @@ public class UpstreamSession {
     public void sendPacketImmediately(@NonNull BedrockPacket packet) {
         if (!isClosed()) {
             session.sendPacketImmediately(packet);
+        }
+    }
+
+    public void sendPacketsImmediately(@NonNull BedrockPacket... packets) {
+        if (!isClosed()) {
+            int subClientId = session instanceof GeyserServerSession geyserSession ? geyserSession.subClientId() : 0;
+            session.getPeer().sendPacketsImmediately(subClientId, 0, packets);
         }
     }
 
