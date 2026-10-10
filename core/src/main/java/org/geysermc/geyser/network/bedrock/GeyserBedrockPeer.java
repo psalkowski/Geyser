@@ -26,13 +26,17 @@
 package org.geysermc.geyser.network.bedrock;
 
 import io.netty.channel.Channel;
+import lombok.Getter;
 import org.cloudburstmc.protocol.bedrock.BedrockPeer;
 import org.cloudburstmc.protocol.bedrock.BedrockSessionFactory;
 
 import java.net.SocketAddress;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class GeyserBedrockPeer extends BedrockPeer {
     private SocketAddress proxiedAddress;
+    @Getter
+    private final AtomicLong nextEntityId = new AtomicLong(2L);
 
     public GeyserBedrockPeer(Channel channel, BedrockSessionFactory sessionFactory) {
         super(channel, sessionFactory);

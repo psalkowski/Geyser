@@ -39,6 +39,8 @@ import org.geysermc.geyser.entity.EntitySpectateHelper;
 import org.geysermc.geyser.entity.type.Entity;
 import org.geysermc.geyser.entity.type.Tickable;
 import org.geysermc.geyser.entity.type.player.PlayerEntity;
+import org.checkerframework.checker.nullness.qual.Nullable;
+import org.geysermc.geyser.network.bedrock.GeyserBedrockPeer;
 import org.geysermc.geyser.session.GeyserSession;
 import org.geysermc.geyser.session.cache.waypoint.GeyserWaypoint;
 
@@ -86,10 +88,17 @@ public class EntityCache {
     private final Set<Entity> dirtyEntities = new ObjectOpenHashSet<>();
 
     @Getter
-    private final AtomicLong nextEntityId = new AtomicLong(2L);
+    private final AtomicLong nextEntityId;
 
     public EntityCache(GeyserSession session) {
         this.session = session;
+        this.nextEntityId = connectionPeer() instanceof GeyserBedrockPeer peer ? peer.getNextEntityId() : new AtomicLong(2L);
+    }
+
+    private @Nullable Object connectionPeer() {
+        var upstream = session.getUpstream();
+        var bedrockSession = upstream == null ? null : upstream.getSession();
+        return bedrockSession == null ? null : bedrockSession.getPeer();
     }
 
     public long nextEntityId() {
